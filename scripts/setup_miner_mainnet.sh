@@ -19,13 +19,13 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COLDKEY_NAME="sparket-mainnet-cold"
-HOTKEY_NAME="sparket-miner"
+COLDKEY_NAME="darnsin01"
+HOTKEY_NAME="sparket-miner-04220"
 AXON_PORT=8094
 DB_PORT=5432
 DB_NAME="sparket_miner"
 DB_USER="sparket"
-DB_PASSWORD="${SPARKET_DATABASE__PASSWORD:-changeme_strong_password}"
+DB_PASSWORD="${SPARKET_DATABASE__PASSWORD:-Password123!@#}"
 DB_CONTAINER="pg-sparket-miner"
 DB_VOLUME="pg_sparket_miner_data"
 BITTENSOR_VENV="$HOME/bittensor-env"

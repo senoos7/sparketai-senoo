@@ -1,0 +1,96 @@
+# Sparket Miner Configuration - Bittensor MAINNET
+#
+# Production configuration for mining on Sparket mainnet.
+# Mainnet chain: wss://entrypoint-finney.opentensor.ai:443
+#
+# Usage:
+#   export SPARKET_MINER_CONFIG_FILE="$(pwd)/sparket/config/miner.mainnet.yaml"
+#   python sparket/entrypoints/miner.py
+#
+# Or with env file + PM2 (recommended):
+#   set -a && source .env.mainnet && set +a
+#   pm2 start ecosystem.mainnet.config.js
+#
+# IMPORTANT:
+#   - Do not put secrets (DB passwords, API keys) in this file.
+#     Pass them via .env.mainnet / environment variables.
+#   - The setup script `scripts/setup_miner_mainnet.sh` will regenerate this
+#     file from its own templates; keep both in sync if you edit here.
+
+role: miner
+
+chain:
+  # Sparket mainnet netuid — verify at https://taostats.io (search "Sparket")
+  # Override without editing this file via SPARKET_CHAIN__NETUID env var.
+  netuid: 57
+
+wallet:
+  # Mainnet coldkey + hotkey created by scripts/setup_miner_mainnet.sh.
+  # Override via SPARKET_WALLET__NAME / SPARKET_WALLET__HOTKEY env vars.
+  name: darnsin01
+  hotkey: sparket-miner-04220
+
+subtensor:
+  # Bittensor mainnet
+  network: finney
+  # Explicit endpoint (wins over network mapping if both are set)
+  chain_endpoint: wss://entrypoint-finney.opentensor.ai:443
+
+axon:
+  host: 0.0.0.0
+  port: 8094
+  # REQUIRED on a VPS behind NAT or a cloud firewall. Set these to your
+  # public-facing IP/port so validators can reach you. Easiest to override
+  # via env:
+  #   SPARKET_AXON__EXTERNAL_IP=<your-vps-public-ip>
+  #   SPARKET_AXON__EXTERNAL_PORT=8094
+  # external_ip: <your-vps-public-ip>
+  # external_port: 8094
+
+miner:
+  # On mainnet, only accept connection info from validators with vpermit.
+  # This is the secure default; set true only if you understand the tradeoff.
+  allow_connection_info_from_unpermitted_validators: false
+
+  cadence:
+    # Odds submission cycle — 15 min is a good baseline for most leagues.
+    # Aggressive miners may drop this to 300-600s; watch rate limits.
+    odds_seconds: 900
+    # Outcome check cadence — 5 min is standard.
+    outcomes_seconds: 300
+
+  rate:
+    # Global per-minute submission cap (well under the 120/min hotkey limit)
+    global_per_minute: 90
+    # Per-market per-minute cap (well under per-market daily cap of 200)
+    per_market_per_minute: 4
+
+  retry:
+    max_attempts: 3
+
+  idempotency:
+    bucket_seconds: 60
+
+database:
+  host: 127.0.0.1
+  port: 5432
+  user: sparket
+  name: sparket_miner
+
+  # Connection pool — tuned for a 16-core VPS running the competitive service
+  pool_size: 20
+  max_overflow: 10
+  pool_timeout: 30
+  pool_recycle: 1800
+  echo: false
+
+  bootstrap:
+    auto_create: true
+    admin_url: null
+
+  docker:
+    enabled: true
+    image: postgres:18
+    port: 5432
+    container_name: pg-sparket-miner
+    volume: pg_sparket_miner_data
