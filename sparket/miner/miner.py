@@ -29,7 +29,7 @@ import bittensor as bt
 from sparket.base.neuron import BaseNeuron
 from sparket.base.config import add_miner_args
 
-from typing import Any, Awaitable, Callable, Tuple, TypeVar, Union
+from typing import Any, Awaitable, Callable, Dict, Tuple, TypeVar, Union
 
 from sparket.miner.config.config import Config as MinerAppConfig
 from sparket.miner.database import DBM, initialize
@@ -130,15 +130,34 @@ class BaseMinerNeuron(BaseNeuron):
             self.validator_client = ValidatorClient(
                 wallet=self.wallet,
                 metagraph=self.metagraph,
+                get_validator_endpoint=lambda: getattr(self, "validator_endpoint", None),
             )
-            
-            if self.dbm is not None:
-                self.game_sync = GameDataSync(
-                    database=self.dbm,
-                    client=self.validator_client,
-                    odds_window_days=self.app_config.validator.ingest.odds_window_days,
+
+            # odds_window_days is only defined under validator config; on a miner
+            # config it is absent, so fall back to the GameDataSync default.
+            _odds_window_days = None
+            try:
+                _odds_window_days = int(
+                    self.app_config.validator.ingest.odds_window_days
                 )
-            bt.logging.info({"miner_init": {"step": "validator_client_ready"}})
+            except Exception:
+                _odds_window_days = None
+
+            if self.dbm is not None:
+                sync_kwargs: Dict[str, Any] = {
+                    "database": self.dbm,
+                    "client": self.validator_client,
+                }
+                if _odds_window_days is not None:
+                    sync_kwargs["odds_window_days"] = _odds_window_days
+                self.game_sync = GameDataSync(**sync_kwargs)
+            bt.logging.info({
+                "miner_init": {
+                    "step": "validator_client_ready",
+                    "game_sync_ready": self.game_sync is not None,
+                    "dbm_ready": self.dbm is not None,
+                }
+            })
         except Exception as exc:
             bt.logging.warning({"miner_init": {"validator_client_error": str(exc)}})
 
