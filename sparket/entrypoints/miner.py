@@ -193,13 +193,58 @@ class Miner(BaseMinerNeuron):
 
         self._validator_cache: dict[str, dict[str, object]] = {}
         self._validator_cache_max_entries: int = 128
-        # Primary validator endpoint (set when CONNECTION_INFO_PUSH received)
+        # Primary validator endpoint (set when CONNECTION_INFO_PUSH received).
+        # Restored from SQLite on startup so the token is available before the
+        # first push arrives.
         self.validator_endpoint: Optional[dict[str, object]] = None
-        
+        self._restore_validator_endpoint_sync()
+
         # Base miner for automatic odds generation
         self.base_miner: Optional["BaseMiner"] = None
         self._base_runtime_loop: Optional[asyncio.AbstractEventLoop] = None
         self._base_runtime_thread: Optional[threading.Thread] = None
+
+    def _restore_validator_endpoint_sync(self) -> None:
+        """Load the most-recently-seen validator endpoint from SQLite on startup.
+
+        This ensures the auth token is available for the first odds cycle even
+        before a fresh CONNECTION_INFO_PUSH arrives (which can take up to ~5 min).
+        """
+        dbm = getattr(self, "dbm", None)
+        if dbm is None:
+            return
+        try:
+            import asyncio as _asyncio
+            from sparket.miner.database.repository import list_validator_endpoints
+
+            async def _load():
+                rows = await list_validator_endpoints(dbm)
+                if rows:
+                    row = rows[0]  # Most recently updated
+                    return {
+                        "hotkey": row.hotkey,
+                        "host": row.host,
+                        "port": row.port,
+                        "url": row.url,
+                        "token": row.token,
+                    }
+                return None
+
+            # Run in a temporary event loop — __init__ is synchronous
+            endpoint = _asyncio.run(_load())
+            if endpoint and endpoint.get("token"):
+                self.validator_endpoint = endpoint
+                bt.logging.info({
+                    "miner_init": {
+                        "step": "validator_endpoint_restored",
+                        "hotkey": endpoint.get("hotkey"),
+                        "host": endpoint.get("host"),
+                        "port": endpoint.get("port"),
+                        "token_present": True,
+                    }
+                })
+        except Exception as exc:
+            bt.logging.debug({"miner_init": {"validator_endpoint_restore_error": str(exc)}})
 
     async def forward(self, synapse: SparketSynapse) -> SparketSynapse:
         """Handle incoming Sparket synapses.
