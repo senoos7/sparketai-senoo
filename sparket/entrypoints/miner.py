@@ -610,7 +610,21 @@ if __name__ == "__main__":
             bt.logging.info({"base_miner": "started" if started else "not_started"})
         except Exception as e:
             bt.logging.warning({"base_miner": "start_failed", "error": str(e)})
-    
+
+    # Start competitive service when base miner is disabled
+    # Enable by setting SPARKET_BASE_MINER__ENABLED=false in .env.mainnet
+    competitive_service = None
+    if not base_miner_initialized:
+        try:
+            from sparket.miner.competitive.service import CompetitiveMinerService
+            competitive_service = CompetitiveMinerService(miner)
+            competitive_service.start()
+            bt.logging.info({"competitive_service": "started"})
+        except ImportError:
+            bt.logging.debug({"competitive_service": "not_available"})
+        except Exception as e:
+            bt.logging.warning({"competitive_service": "start_failed", "error": str(e)})
+
     # Start control API for external model integration
     # Configure via SPARKET_MINER_API_PORT (default: 8198) 
     # Disable with SPARKET_MINER_API_ENABLED=false
@@ -644,7 +658,14 @@ if __name__ == "__main__":
             bt.logging.info({"base_miner": "stopped"})
         except Exception:
             pass
-        
+
+        # Stop competitive service
+        if competitive_service:
+            try:
+                competitive_service.stop()
+            except Exception:
+                pass
+
         if control_api:
             try:
                 control_api.stop()

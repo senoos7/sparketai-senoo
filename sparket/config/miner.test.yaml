@@ -1,0 +1,74 @@
+# Sparket Miner Configuration - Bittensor TESTNET
+#
+# Use this file to test your miner on the Bittensor testnet before going mainnet.
+# Testnet chain: wss://test.finney.opentensor.ai:443
+#
+# Usage:
+#   export SPARKET_MINER_CONFIG_FILE="$(pwd)/sparket/config/miner.test.yaml"
+#   python sparket/entrypoints/miner.py
+#
+# Or with env file:
+#   set -a && source .env.test && set +a
+#   python sparket/entrypoints/miner.py
+
+role: miner
+
+chain:
+  # Sparket testnet netuid — verify at https://x.taostats.io/?network=test
+  # Set SPARKET_CHAIN__NETUID env var to override without editing this file
+  netuid: 57
+
+wallet:
+  # Reuse your existing testnet coldkey; hotkey will be sparket-miner
+  name: itsai-testnet-cold0
+  hotkey: sparket-miner
+
+subtensor:
+  # Bittensor testnet
+  network: test
+  # Explicit endpoint (wins over network mapping if both are set)
+  chain_endpoint: wss://test.finney.opentensor.ai:443
+
+axon:
+  host: 0.0.0.0
+  port: 8094
+  # Set these if your VPS is behind NAT / a provider firewall
+  # external_ip: <your-vps-public-ip>
+  # external_port: 8094
+
+miner:
+  # Allow test validators that may not hold vpermit on testnet
+  allow_connection_info_from_unpermitted_validators: true
+  cadence:
+    odds_seconds: 900       # 15-min cycle for most leagues
+    outcomes_seconds: 300   # Check outcomes every 5 min
+  rate:
+    global_per_minute: 60
+    per_market_per_minute: 6
+  retry:
+    max_attempts: 3
+  idempotency:
+    bucket_seconds: 60
+
+database:
+  host: 127.0.0.1
+  port: 5435
+  user: sparket
+  name: sparket_miner_test
+
+  pool_size: 10
+  max_overflow: 5
+  pool_timeout: 30
+  pool_recycle: 1800
+  echo: false
+
+  bootstrap:
+    auto_create: true
+    admin_url: null
+
+  docker:
+    enabled: true
+    image: postgres:18
+    port: 5435
+    container_name: pg-sparket-miner-test
+    volume: pg_sparket_miner_test_data
