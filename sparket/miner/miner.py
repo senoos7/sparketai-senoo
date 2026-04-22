@@ -179,6 +179,27 @@ class BaseMinerNeuron(BaseNeuron):
             wallet=self.wallet,
             config=self.config() if callable(self.config) else self.config,
         )
+
+        # Force external_ip / external_port from Settings (YAML + env) since
+        # Bittensor's Config layer auto-detects the public IP and can fall
+        # back to 0.0.0.0 when that detection is blocked on a VPS.
+        # This mirrors sparket/validator/validator.py:serve_axon().
+        try:
+            from sparket.config import load_settings
+            _settings = load_settings(role="miner")
+            _axon_cfg = getattr(_settings, "axon", None)
+            if _axon_cfg is not None:
+                _ext_ip = getattr(_axon_cfg, "external_ip", None)
+                _ext_port = getattr(_axon_cfg, "external_port", None)
+                if _ext_ip and _ext_ip != "0.0.0.0":
+                    self.axon.external_ip = _ext_ip
+                    bt.logging.info({"axon_external_ip_set": _ext_ip})
+                if _ext_port:
+                    self.axon.external_port = int(_ext_port)
+                    bt.logging.info({"axon_external_port_set": int(_ext_port)})
+        except Exception as _ext_err:
+            bt.logging.warning({"axon_external_ip_error": str(_ext_err)})
+
         bt.logging.info({"miner_init": {"step": "axon_created", "axon": repr(self.axon)}})
 
         # Attach determiners which functions are called when servicing a request.
