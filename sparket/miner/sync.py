@@ -205,7 +205,6 @@ class GameDataSync:
             rows = await self.database.read(
                 _SELECT_ACTIVE_MARKETS,
                 params={"now": now, "window_end": window_end},
-                mappings=True,
             )
             return [
                 {
@@ -233,10 +232,14 @@ class GameDataSync:
             rows = await self.database.read(_SELECT_LAST_SYNC)
             if rows and rows[0].get("last_sync"):
                 ts = rows[0]["last_sync"]
-                if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                self._last_sync_ts = ts
-                return ts
+                # SQLite may return datetime as string or as datetime object
+                if isinstance(ts, str):
+                    ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                if isinstance(ts, datetime):
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    self._last_sync_ts = ts
+                    return ts
         except Exception:
             pass
         return None
