@@ -23,16 +23,36 @@ _DEFAULT_ELO = 1500.0
 # Home field advantage in Elo points (equivalent to ~56% win probability)
 HOME_ADVANTAGE = 65.0
 
-# K-factors per league — higher K = faster adjustment to recent results
+# K-factors per league — higher K = faster adjustment to recent results.
+# Each miner can override the global multiplier via COMPETITIVE_ELO_K env var
+# so that different miners' Elo ratings diverge over time (Uniqueness pillar).
+_K_SCALE = float(os.getenv("COMPETITIVE_ELO_K", "1.0")) if os.getenv("COMPETITIVE_ELO_K", "1.0").replace(".", "", 1).isdigit() else 1.0
+
+# If COMPETITIVE_ELO_K > 5 it's treated as an absolute override for all leagues;
+# otherwise it's a multiplier (e.g. 0.75 → conservative, 1.5 → aggressive).
+_K_ABSOLUTE = float(os.getenv("COMPETITIVE_ELO_K", "0")) if float(os.getenv("COMPETITIVE_ELO_K", "0")) > 5 else None
+
 _K_FACTORS: Dict[str, float] = {
     "mlb":  28.0,   # high variance sport, ~162-game season
     "nba":  20.0,   # moderate; teams are well-separated
     "nfl":  32.0,   # high variance, 17-game season
     "epl":  24.0,
-    "esp":  24.0,   # La Liga
-    "bun":  24.0,   # Bundesliga
+    "la_liga":  24.0,
+    "serie_a":  24.0,
+    "bundesliga": 24.0,
+    "mls":  26.0,
+    "nhl":  28.0,
+    "ncaab": 32.0,
+    "ncaaf": 32.0,
     "default": 24.0,
 }
+
+def _k_for(league: str) -> float:
+    """Return the K-factor for a league, scaled by COMPETITIVE_ELO_K."""
+    if _K_ABSOLUTE is not None:
+        return _K_ABSOLUTE
+    base = _K_FACTORS.get(league.lower(), _K_FACTORS["default"])
+    return base * _K_SCALE
 
 
 class EloRatings:
@@ -51,7 +71,11 @@ class EloRatings:
         elo.save()
     """
 
-    def __init__(self, storage_path: str | Path = "~/.sparket/elo.json") -> None:
+    def __init__(self, storage_path: str | Path | None = None) -> None:
+        # Default path is hotkey-scoped so multiple miners don't share Elo state.
+        if storage_path is None:
+            hotkey = os.getenv("SPARKET_WALLET__HOTKEY", "default")
+            storage_path = f"~/.sparket/elo_{hotkey}.json"
         self._path = Path(os.path.expanduser(str(storage_path)))
         # ratings[league][team_code] = elo_float
         self._ratings: Dict[str, Dict[str, float]] = {}
@@ -106,7 +130,7 @@ class EloRatings:
     ) -> None:
         """Update ratings after a settled game."""
         league = league.lower()
-        k = _K_FACTORS.get(league, _K_FACTORS["default"])
+        k = _k_for(league)
 
         r_home = self.get(league, home_team) + HOME_ADVANTAGE
         r_away = self.get(league, away_team)
