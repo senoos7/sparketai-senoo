@@ -58,10 +58,10 @@ LOG_DIR="sparket/logs/pm2-mainnet"
 MINERS=(
   # WALLET    HOTKEY                PORT  PM2_NAME              API_PORT  LEAGUES               ELO_K
   # Group A
-  "darnsin01  sparket-miner-04220   8094  sparket-miner-01      8198      mlb,nba,nfl           32"
-  "darnsin01  sparket-miner-04231   8096  sparket-miner-03      8200      mls,nhl,ncaab,ncaaf   48"
+  "darnsin01  sparket-miner-04220   8094  sparket-miner-01      9094      mlb,nba,nfl           32"
+  "darnsin01  sparket-miner-04231   8096  sparket-miner-03      9096      mls,nhl,ncaab,ncaaf   48"
   # Group B
-  "darnsin00  sparket-miner-04230   8095  sparket-miner-02      9100      epl,la_liga,serie_a,bundesliga  24"
+  "darnsin00  sparket-miner-04230   8095  sparket-miner-02      9095      epl,la_liga,serie_a,bundesliga  24"
 )
 
 # ----------------------------------------------------------------
