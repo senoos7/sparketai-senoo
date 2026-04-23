@@ -40,7 +40,9 @@ NETWORK="finney"
 NETUID="57"
 EXTERNAL_IP="${SPARKET_AXON__EXTERNAL_IP:-$(curl -s ifconfig.me 2>/dev/null || echo '0.0.0.0')}"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PYTHON="${PYTHON:-$(which python3)}"
+# Prefer the project venv Python (has sparket installed); fall back to python3
+PYTHON="${PYTHON:-${REPO_DIR}/.venv/bin/python}"
+if [[ ! -x "$PYTHON" ]]; then PYTHON="$(which python3)"; fi
 LOG_DIR="sparket/logs/pm2-mainnet"
 
 # ----------------------------------------------------------------
@@ -114,6 +116,7 @@ set -a
 # shellcheck source=/dev/null
 source "${env_path}"
 set +a
+export PYTHONPATH="${REPO_DIR}\${PYTHONPATH:+:\$PYTHONPATH}"
 exec "${PYTHON}" "${REPO_DIR}/sparket/entrypoints/miner.py"
 WRAPPER
   chmod +x "$wrapper"
