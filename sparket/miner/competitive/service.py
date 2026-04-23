@@ -32,9 +32,13 @@ To wire into the miner entrypoint, add to sparket/entrypoints/miner.py:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import time
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import bittensor as bt
@@ -54,9 +58,58 @@ from sparket.miner.competitive.model import ModelRegistry
 _ODDS_INTERVAL    = int(os.getenv("COMPETITIVE_ODDS_INTERVAL", "900"))    # 15 min
 _OUTCOME_INTERVAL = int(os.getenv("COMPETITIVE_OUTCOME_INTERVAL", "300")) # 5 min
 _BATCH_SIZE       = int(os.getenv("COMPETITIVE_BATCH_SIZE", "75"))
+_KPI_LOG_EVERY    = int(os.getenv("COMPETITIVE_KPI_LOG_EVERY", "12"))     # cycles
+_KPI_EXPORT_EVERY = int(os.getenv("COMPETITIVE_KPI_EXPORT_EVERY", "12"))  # cycles
 
 # If our calibrated probability deviates from last submitted by >= this, submit early
 _EARLY_TRIGGER_DELTA = 0.025
+
+# ---------------------------------------------------------------------------
+# KPI counters — cumulative since process start
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _KPI:
+    cycles_total: int = 0
+
+    markets_seen: int = 0
+    markets_submitted: int = 0
+    markets_skipped_generation: int = 0
+    markets_skipped_low_change: int = 0
+
+    odds_batches_attempted: int = 0
+    odds_batches_succeeded: int = 0
+    odds_batches_failed: int = 0
+
+    outcome_events_seen: int = 0
+    outcomes_submitted: int = 0
+    outcomes_failed: int = 0
+    outcomes_skipped_no_espn_match: int = 0
+    outcomes_skipped_not_final: int = 0
+    outcomes_skipped_no_winner: int = 0
+
+    kind_moneyline_seen: int = 0
+    kind_spread_seen: int = 0
+    kind_total_seen: int = 0
+    kind_moneyline_submitted: int = 0
+    kind_spread_submitted: int = 0
+    kind_total_submitted: int = 0
+
+    def to_dict(self, hotkey: str, config_snapshot: Dict) -> Dict:
+        ms = max(self.markets_seen, 1)
+        obs = max(self.odds_batches_attempted, 1)
+        oes = max(self.outcome_events_seen, 1)
+        return {
+            "ts_utc": datetime.now(timezone.utc).isoformat(),
+            "hotkey": hotkey,
+            **asdict(self),
+            "submit_rate": round(self.markets_submitted / ms, 6),
+            "low_change_skip_rate": round(self.markets_skipped_low_change / ms, 6),
+            "batch_success_rate": round(self.odds_batches_succeeded / obs, 6),
+            "outcome_submit_rate": round(self.outcomes_submitted / oes, 6),
+            "profile_id": hashlib.md5(hotkey.encode()).hexdigest()[:12],
+            "config": config_snapshot,
+        }
 
 
 class CompetitiveMinerService:
@@ -92,6 +145,20 @@ class CompetitiveMinerService:
 
         self._running = False
         self._tasks: List[asyncio.Task] = []
+
+        # KPI tracking
+        self._kpi = _KPI()
+        hotkey_slug = os.getenv("SPARKET_WALLET__HOTKEY", self._hotkey[:12])
+        kpi_dir = Path(os.path.expanduser("~/.sparket"))
+        kpi_dir.mkdir(parents=True, exist_ok=True)
+        self._kpi_path = kpi_dir / f"kpi_{hotkey_slug}.json"
+        self._config_snapshot: Dict = {
+            "odds_interval": _ODDS_INTERVAL,
+            "outcome_interval": _OUTCOME_INTERVAL,
+            "batch_size": _BATCH_SIZE,
+            "early_trigger_delta": _EARLY_TRIGGER_DELTA,
+            "leagues": self._selector.leagues() if hasattr(self._selector, "leagues") else [],
+        }
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -168,25 +235,38 @@ class CompetitiveMinerService:
         markets = self._selector.select(all_markets)
         if not markets:
             bt.logging.debug({"competitive_odds": "no_markets_after_selection"})
+            self._kpi.cycles_total += 1
+            self._maybe_export_kpi()
             return
 
         # 4. Price each market, collect into batch
         now = datetime.now(timezone.utc)
         batch: List[Dict] = []
-        skipped = 0
+        skipped_gen = 0
+        skipped_low = 0
         early_triggers = 0
         total_submitted = 0
         batch_count = 0
 
+        self._kpi.markets_seen += len(markets)
         for market in markets:
+            kind = market.get("kind", "moneyline").lower()
+            # count market kind seen
+            if kind == "moneyline":
+                self._kpi.kind_moneyline_seen += 1
+            elif kind == "spread":
+                self._kpi.kind_spread_seen += 1
+            elif kind == "total":
+                self._kpi.kind_total_seen += 1
+
             try:
                 priced = await self._price_market(market)
                 if priced is None:
-                    skipped += 1
+                    skipped_gen += 1
+                    self._kpi.markets_skipped_generation += 1
                     continue
 
                 market_id = int(market["market_id"])
-                kind = market.get("kind", "moneyline").lower()
 
                 # Early-trigger: check if probability moved enough to justify
                 # an immediate submission outside the normal cadence
@@ -194,7 +274,8 @@ class CompetitiveMinerService:
                     new_p = priced["prices"][0]["imp_prob"]
                     last_p = self._last_prob.get(market_id, -1.0)
                     if last_p >= 0 and abs(new_p - last_p) < _EARLY_TRIGGER_DELTA:
-                        skipped += 1  # no meaningful change — skip this cycle
+                        skipped_low += 1
+                        self._kpi.markets_skipped_low_change += 1
                         continue
                     else:
                         if last_p >= 0:
@@ -211,14 +292,21 @@ class CompetitiveMinerService:
 
                 # Flush batch when full
                 if len(batch) >= _BATCH_SIZE:
+                    self._kpi.odds_batches_attempted += 1
                     ok = await self._submit_odds_batch(batch)
                     if ok:
                         total_submitted += len(batch)
+                        self._kpi.odds_batches_succeeded += 1
+                        self._kpi.markets_submitted += len(batch)
+                        self._kpi_count_kinds_submitted(batch)
+                    else:
+                        self._kpi.odds_batches_failed += 1
                     batch_count += 1
                     batch = []
 
             except Exception as e:
-                skipped += 1
+                skipped_gen += 1
+                self._kpi.markets_skipped_generation += 1
                 bt.logging.debug({
                     "competitive_price_error": str(e),
                     "market_id": market.get("market_id"),
@@ -226,20 +314,33 @@ class CompetitiveMinerService:
 
         # Flush remaining
         if batch:
+            self._kpi.odds_batches_attempted += 1
             ok = await self._submit_odds_batch(batch)
             if ok:
                 total_submitted += len(batch)
+                self._kpi.odds_batches_succeeded += 1
+                self._kpi.markets_submitted += len(batch)
+                self._kpi_count_kinds_submitted(batch)
+            else:
+                self._kpi.odds_batches_failed += 1
             batch_count += 1
+
+        self._kpi.cycles_total += 1
 
         bt.logging.info({
             "competitive_odds_cycle": {
+                "cycle": self._kpi.cycles_total,
                 "markets_selected": len(markets),
                 "submitted": total_submitted,
-                "skipped": skipped,
+                "skipped_gen": skipped_gen,
+                "skipped_low_change": skipped_low,
                 "early_triggers": early_triggers,
                 "batches": batch_count,
+                "total_submitted_cumul": self._kpi.markets_submitted,
             }
         })
+
+        self._maybe_export_kpi()
 
     async def _price_market(self, market: Dict) -> Optional[Dict]:
         """Price a single market using Elo + LightGBM model."""
@@ -303,10 +404,27 @@ class CompetitiveMinerService:
             return
 
         submitted = 0
+        self._kpi.outcome_events_seen += len(finished)
+
         for event in finished:
             try:
                 result = await self._espn.get_result(event)
-                if result is None or not result.is_final:
+                if result is None:
+                    self._kpi.outcomes_skipped_no_espn_match += 1
+                    continue
+                if not result.is_final:
+                    self._kpi.outcomes_skipped_not_final += 1
+                    continue
+
+                # Determine winner — skip if indeterminate
+                if hasattr(result, "winner"):
+                    winner = result.winner
+                else:
+                    hs = result.home_score or 0
+                    as_ = result.away_score or 0
+                    winner = "home" if hs > as_ else ("away" if as_ > hs else None)
+                if winner is None:
+                    self._kpi.outcomes_skipped_no_winner += 1
                     continue
 
                 # Build outcome payload
@@ -314,6 +432,9 @@ class CompetitiveMinerService:
                 ok = await self._client.submit_outcome(payload)
                 if ok:
                     submitted += 1
+                    self._kpi.outcomes_submitted += 1
+                else:
+                    self._kpi.outcomes_failed += 1
 
                 # Update Elo ratings from this result
                 league  = (event.get("league") or event.get("sport") or "").lower()
@@ -334,6 +455,7 @@ class CompetitiveMinerService:
                     self._models.add_resolved(league, features, float(h_score), float(a_score))
 
             except Exception as e:
+                self._kpi.outcomes_failed += 1
                 bt.logging.debug({
                     "competitive_outcome_error": str(e),
                     "event_id": event.get("event_id"),
@@ -378,6 +500,37 @@ class CompetitiveMinerService:
     def _token(self) -> Optional[str]:
         endpoint = getattr(self.miner, "validator_endpoint", None) or {}
         return endpoint.get("token") if isinstance(endpoint, dict) else None
+
+    # ------------------------------------------------------------------
+    # KPI helpers
+    # ------------------------------------------------------------------
+
+    def _kpi_count_kinds_submitted(self, batch: List[Dict]) -> None:
+        for item in batch:
+            kind = item.get("kind", "moneyline").lower()
+            if kind == "moneyline":
+                self._kpi.kind_moneyline_submitted += 1
+            elif kind == "spread":
+                self._kpi.kind_spread_submitted += 1
+            elif kind == "total":
+                self._kpi.kind_total_submitted += 1
+
+    def _maybe_export_kpi(self) -> None:
+        cycle = self._kpi.cycles_total
+        if cycle == 0:
+            return
+        if cycle % _KPI_LOG_EVERY == 0:
+            bt.logging.info({"kpi": self._kpi.to_dict(self._hotkey, self._config_snapshot)})
+        if cycle % _KPI_EXPORT_EVERY == 0:
+            try:
+                data = self._kpi.to_dict(self._hotkey, self._config_snapshot)
+                self._kpi_path.write_text(json.dumps(data, indent=2))
+            except Exception as exc:
+                bt.logging.debug({"kpi_export_error": str(exc)})
+
+    def get_kpi(self) -> Dict:
+        """Return the current KPI snapshot as a dict (for external inspection)."""
+        return self._kpi.to_dict(self._hotkey, self._config_snapshot)
 
     def model_summary(self) -> Dict:
         """Return a summary of model readiness per league — for monitoring."""
