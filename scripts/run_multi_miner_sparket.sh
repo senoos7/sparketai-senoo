@@ -94,8 +94,30 @@ env_file_for() { echo "${REPO_DIR}/.env.${1}"; }
 # YAML config path for a miner
 yaml_file_for() { echo "${REPO_DIR}/sparket/config/${1}.yaml"; }
 
+# Wrapper script path for a miner (sources env then exec python)
+wrapper_for() { echo "${REPO_DIR}/scripts/.run_${1}.sh"; }
+
 # SQLite DB filename for a miner (unique per miner)
 db_file_for() { echo "${1}.db"; }
+
+# ----------------------------------------------------------------
+# Generate per-miner wrapper script (sources .env then runs Python)
+# Needed because older PM2 versions don't support --env-file.
+# ----------------------------------------------------------------
+generate_wrapper() {
+  local pm2_name="$1"
+  local env_path; env_path="$(env_file_for "$pm2_name")"
+  local wrapper; wrapper="$(wrapper_for "$pm2_name")"
+  cat > "$wrapper" << WRAPPER
+#!/bin/bash
+set -a
+# shellcheck source=/dev/null
+source "${env_path}"
+set +a
+exec "${PYTHON}" "${REPO_DIR}/sparket/entrypoints/miner.py"
+WRAPPER
+  chmod +x "$wrapper"
+}
 
 # ----------------------------------------------------------------
 # Generate per-miner .env file
@@ -234,21 +256,20 @@ start_all() {
     # Generate config files
     generate_env "$_PM2_NAME" "$_WALLET" "$_HOTKEY" "$_PORT" "$_API_PORT" "$_LEAGUES" "$_ELO_K"
     generate_yaml "$_PM2_NAME" "$_WALLET" "$_HOTKEY" "$_PORT"
+    generate_wrapper "$_PM2_NAME"
 
-    local env_path
-    env_path="$(env_file_for "$_PM2_NAME")"
+    local wrapper
+    wrapper="$(wrapper_for "$_PM2_NAME")"
 
     # Delete old process if it exists
     pm2 delete "$_PM2_NAME" 2>/dev/null || true
 
-    # Start with all env vars loaded
-    pm2 start "$PYTHON" \
+    # Start via wrapper script (sources .env file; avoids --env-file PM2 flag)
+    pm2 start "$wrapper" \
       --name "$_PM2_NAME" \
-      --cwd "$REPO_DIR" \
-      --env-file "$env_path" \
+      --interpreter bash \
       --output "${REPO_DIR}/${LOG_DIR}/${_PM2_NAME}-out.log" \
-      --error  "${REPO_DIR}/${LOG_DIR}/${_PM2_NAME}-err.log" \
-      -- sparket/entrypoints/miner.py
+      --error  "${REPO_DIR}/${LOG_DIR}/${_PM2_NAME}-err.log"
   done
 
   pm2 save
@@ -274,9 +295,10 @@ restart_all() {
     local env_path
     env_path="$(env_file_for "$_PM2_NAME")"
     # Regenerate configs then restart
-    generate_env  "$_PM2_NAME" "$_WALLET" "$_HOTKEY" "$_PORT" "$_API_PORT" "$_LEAGUES" "$_ELO_K"
-    generate_yaml "$_PM2_NAME" "$_WALLET" "$_HOTKEY" "$_PORT"
-    pm2 restart "$_PM2_NAME" --update-env 2>/dev/null \
+    generate_env     "$_PM2_NAME" "$_WALLET" "$_HOTKEY" "$_PORT" "$_API_PORT" "$_LEAGUES" "$_ELO_K"
+    generate_yaml    "$_PM2_NAME" "$_WALLET" "$_HOTKEY" "$_PORT"
+    generate_wrapper "$_PM2_NAME"
+    pm2 restart "$_PM2_NAME" 2>/dev/null \
       || echo "  Not running — use 'start' first"
   done
 }
