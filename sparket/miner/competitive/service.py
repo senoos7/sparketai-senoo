@@ -61,8 +61,25 @@ _BATCH_SIZE       = int(os.getenv("COMPETITIVE_BATCH_SIZE", "75"))
 _KPI_LOG_EVERY    = int(os.getenv("COMPETITIVE_KPI_LOG_EVERY", "12"))     # cycles
 _KPI_EXPORT_EVERY = int(os.getenv("COMPETITIVE_KPI_EXPORT_EVERY", "12"))  # cycles
 
-# If our calibrated probability deviates from last submitted by >= this, submit early
-_EARLY_TRIGGER_DELTA = 0.025
+# ── Submission quality filters ──────────────────────────────────────────────
+# Top miners submit to very few markets (p14 n_submissions) but target
+# thin/niche markets nobody else covers (p100 Marginal) and only submit
+# when they strongly disagree with the market consensus (p90 Edge).
+#
+# COMPETITIVE_MIN_EDGE: minimum absolute deviation between our implied
+#   probability and the market consensus probability to justify submission.
+#   0.0 = submit everything (bad Edge).
+#   0.06 = only submit when we disagree by ≥6 pp (recommended default).
+_MIN_EDGE_THRESHOLD = float(os.getenv("COMPETITIVE_MIN_EDGE", "0.06"))
+
+# COMPETITIVE_CHANGE_THRESHOLD: skip re-submission if our price hasn't moved
+#   by at least this much since last submission (reduces spam, improves Edge).
+_EARLY_TRIGGER_DELTA = float(os.getenv("COMPETITIVE_CHANGE_THRESHOLD", "0.05"))
+
+# COMPETITIVE_MAX_MARKETS: hard cap on markets priced per cycle.
+#   Lower = more selective = higher Marginal score.
+#   Top miner's strategy: submit to very few, niche markets only.
+_MAX_MARKETS_PER_CYCLE = int(os.getenv("COMPETITIVE_MAX_MARKETS", "50"))
 
 # ---------------------------------------------------------------------------
 # KPI counters — cumulative since process start
@@ -156,7 +173,11 @@ class CompetitiveMinerService:
             "odds_interval": _ODDS_INTERVAL,
             "outcome_interval": _OUTCOME_INTERVAL,
             "batch_size": _BATCH_SIZE,
-            "early_trigger_delta": _EARLY_TRIGGER_DELTA,
+            "change_threshold": _EARLY_TRIGGER_DELTA,
+            "min_edge": _MIN_EDGE_THRESHOLD,
+            "max_markets_per_cycle": _MAX_MARKETS_PER_CYCLE,
+            "elo_k": os.getenv("COMPETITIVE_ELO_K", "1.0"),
+            "model_seed": os.getenv("COMPETITIVE_MODEL_SEED", "42"),
             "leagues": self._selector.leagues() if hasattr(self._selector, "leagues") else [],
         }
 
@@ -231,13 +252,14 @@ class CompetitiveMinerService:
             bt.logging.debug({"competitive_odds": "no_active_markets"})
             return
 
-        # 3. Filter and rank via EventSelector
+        # 3. Filter and rank via EventSelector, then cap to max markets
         markets = self._selector.select(all_markets)
         if not markets:
             bt.logging.debug({"competitive_odds": "no_markets_after_selection"})
             self._kpi.cycles_total += 1
             self._maybe_export_kpi()
             return
+        markets = markets[:_MAX_MARKETS_PER_CYCLE]
 
         # 4. Price each market, collect into batch
         now = datetime.now(timezone.utc)
@@ -268,10 +290,25 @@ class CompetitiveMinerService:
 
                 market_id = int(market["market_id"])
 
-                # Early-trigger: check if probability moved enough to justify
-                # an immediate submission outside the normal cadence
                 if kind == "moneyline":
                     new_p = priced["prices"][0]["imp_prob"]
+
+                    # ── Edge filter: only submit if we disagree with market
+                    # consensus by >= MIN_EDGE_THRESHOLD (drives Edge score).
+                    # consensus_prob is the market's implied home-win probability;
+                    # it comes from the market's moneyline_home field if present.
+                    consensus_p = _market_consensus_prob(market)
+                    if (
+                        consensus_p is not None
+                        and _MIN_EDGE_THRESHOLD > 0
+                        and abs(new_p - consensus_p) < _MIN_EDGE_THRESHOLD
+                    ):
+                        skipped_low += 1
+                        self._kpi.markets_skipped_low_change += 1
+                        continue
+
+                    # ── Change filter: skip re-submission if our price hasn't
+                    # moved enough since last cycle (reduces spam).
                     last_p = self._last_prob.get(market_id, -1.0)
                     if last_p >= 0 and abs(new_p - last_p) < _EARLY_TRIGGER_DELTA:
                         skipped_low += 1
@@ -500,6 +537,38 @@ class CompetitiveMinerService:
     def _token(self) -> Optional[str]:
         endpoint = getattr(self.miner, "validator_endpoint", None) or {}
         return endpoint.get("token") if isinstance(endpoint, dict) else None
+
+
+def _market_consensus_prob(market: Dict) -> Optional[float]:
+    """Extract the market's consensus home-win implied probability.
+
+    The validator stores consensus odds in fields like moneyline_home
+    (implied probability of home win).  Returns None if not available so
+    the caller can decide whether to skip the edge filter.
+    """
+    # Try direct field first
+    for key in ("moneyline_home", "consensus_home", "implied_prob_home"):
+        val = market.get(key)
+        if val is not None:
+            try:
+                p = float(val)
+                if 0.01 < p < 0.99:
+                    return p
+            except (TypeError, ValueError):
+                pass
+    # Some schemas nest under "consensus" dict
+    consensus = market.get("consensus") or market.get("market_consensus")
+    if isinstance(consensus, dict):
+        for key in ("moneyline_home", "home", "implied_prob_home"):
+            val = consensus.get(key)
+            if val is not None:
+                try:
+                    p = float(val)
+                    if 0.01 < p < 0.99:
+                        return p
+                except (TypeError, ValueError):
+                    pass
+    return None
 
     # ------------------------------------------------------------------
     # KPI helpers

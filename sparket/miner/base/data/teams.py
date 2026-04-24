@@ -120,13 +120,24 @@ ESPN_SPORT_PATHS: Dict[str, str] = {
     "NHL":   "hockey/nhl",
     "NCAAF": "football/college-football",
     "NCAAB": "basketball/mens-college-basketball",
-    # Soccer / football
+    # Soccer / football — major leagues with ESPN API coverage
     "MLS":        "soccer/usa.1",
     "EPL":        "soccer/eng.1",
+    "ENG":        "soccer/eng.1",
     "LA_LIGA":    "soccer/esp.1",
+    "ESP":        "soccer/esp.1",
     "SERIE_A":    "soccer/ita.1",
+    "ITA":        "soccer/ita.1",
     "BUNDESLIGA": "soccer/ger.1",
-    # Common aliases the validator may send
+    "GER":        "soccer/ger.1",
+    # Additional validator league codes
+    "FRL1":       "soccer/fra.1",   # French Ligue 1
+    "FRA":        "soccer/fra.1",
+    "LIGUE1":     "soccer/fra.1",
+    "POR":        "soccer/por.1",   # Primeira Liga (Portugal)
+    "NED":        "soccer/ned.1",   # Eredivisie (Netherlands)
+    "UOL":        "soccer/eng.1",   # UOL maps to EPL scoreboard as fallback
+    # Common aliases
     "PREMIER_LEAGUE": "soccer/eng.1",
     "ENGLISH_PREMIER_LEAGUE": "soccer/eng.1",
     "LALIGA":     "soccer/esp.1",

@@ -24,6 +24,25 @@ from typing import Any, Dict, List, Optional
 # Adjust based on observed competition on the dashboard.
 _DEFAULT_LEAGUES = ["mlb", "epl", "nba", "esp", "nfl"]
 
+# Normalise user-friendly names → validator-side league codes.
+# The validator uses short codes like "esp" (La Liga), "ita" (Serie A), etc.
+# This lets callers configure "la_liga" and still match "esp" in market data.
+_LEAGUE_ALIASES: dict[str, str] = {
+    # Soccer long names → validator short codes
+    "la_liga":    "esp",
+    "laliga":     "esp",
+    "serie_a":    "ita",
+    "seriea":     "ita",
+    "bundesliga": "ger",
+    "bund":       "ger",
+    "premier_league":          "epl",
+    "english_premier_league":  "epl",
+    "ligue1":     "frl1",
+    "ligue_1":    "frl1",
+    "french_ligue_1": "frl1",
+    "mls":        "mls",
+}
+
 # Games with consensus ≥ this are sentinel/no-data — skip them
 _SENTINEL_THRESHOLD = float(os.getenv("COMPETITIVE_SENTINEL_THRESHOLD", "0.98"))
 
@@ -50,10 +69,10 @@ class EventSelector:
         max_markets_per_cycle: int = 300,
     ) -> None:
         env_leagues = os.getenv("COMPETITIVE_LEAGUES", "")
-        if env_leagues:
-            self._leagues = [l.strip().lower() for l in env_leagues.split(",") if l.strip()]
-        else:
-            self._leagues = [l.lower() for l in (leagues or _DEFAULT_LEAGUES)]
+        raw = [l.strip().lower() for l in env_leagues.split(",") if l.strip()] if env_leagues \
+              else [l.lower() for l in (leagues or _DEFAULT_LEAGUES)]
+        # Normalise aliases so "la_liga" → "esp" etc. to match validator codes
+        self._leagues = [_LEAGUE_ALIASES.get(l, l) for l in raw]
 
         self._sentinel = sentinel_threshold
         self._min_minutes = min_minutes_before

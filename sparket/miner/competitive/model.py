@@ -37,6 +37,11 @@ MIN_TRAIN_SAMPLES = 80
 # Retrain after this many new resolved samples accumulate
 RETRAIN_EVERY_N = 30
 
+# Per-miner random seed — set COMPETITIVE_MODEL_SEED in the miner's .env.
+# Different seeds produce different decision-tree splits, yielding unique
+# probability outputs even from similar training data → higher Uniqueness score.
+_MODEL_SEED = int(os.getenv("COMPETITIVE_MODEL_SEED", "42"))
+
 # LightGBM hyperparameters — tuned for small datasets on 16-core CPU
 _LGB_PARAMS = {
     "objective": "binary",
@@ -51,7 +56,7 @@ _LGB_PARAMS = {
     "reg_lambda": 0.1,
     "n_jobs": -1,               # uses all 16 cores
     "verbose": -1,
-    "random_state": 42,
+    "random_state": _MODEL_SEED,
 }
 
 # VIG applied to convert probabilities to decimal odds
@@ -64,8 +69,13 @@ class MatchPredictor:
     One instance per league. The service manages a dict of predictors.
     """
 
-    def __init__(self, league: str, model_dir: str | Path = "~/.sparket/models") -> None:
+    def __init__(self, league: str, model_dir: str | Path | None = None) -> None:
         self.league = league.lower()
+        # Scope model files per hotkey so multiple miners running on the same
+        # host don't overwrite each other's trained artifacts.
+        if model_dir is None:
+            hotkey = os.getenv("SPARKET_WALLET__HOTKEY", "default")
+            model_dir = f"~/.sparket/models/{hotkey}"
         self._dir = Path(os.path.expanduser(str(model_dir)))
         self._model_path = self._dir / f"model_{self.league}.pkl"
 
