@@ -182,7 +182,16 @@ else:
         sc    = colour_rate(srate, lo=0.01, hi=0.05)
 
         rst_warn = f" {YELLOW}↺{rst}{RESET}" if rst > 3 else ""
-        mem_str  = f"{mem}M" if mem else ""
+
+        # Warn when KPI is stale (> 4 hours = missed at least one export)
+        kpi_age_str = age(ts)
+        try:
+            t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            kpi_stale = (now_utc - t).total_seconds() > 4 * 3600
+        except Exception:
+            kpi_stale = True
+        age_col = YELLOW if kpi_stale else DIM
+        age_note = " ←stale" if kpi_stale else ""
 
         print(
             f"  {CYAN}{slug:<24}{RESET} "
@@ -191,7 +200,7 @@ else:
             f"{sc}{srate:>6.3f}{RESET} "
             f"{rc}{bsr:>5.0%}{RESET} "
             f"{osub:>6} {orate:>5.2f} "
-            f"{DIM}{age(ts):>9}{RESET}  "
+            f"{age_col}{kpi_age_str:>9}{age_note}{RESET}  "
             f"{DIM}{leagues[:35]}{RESET}"
             f"{rst_warn}"
         )
@@ -214,53 +223,74 @@ if log_dir.exists():
         except Exception:
             continue
 
-        # Find last competitive_odds_cycle line
-        last_cycle = None
-        last_submit = None
+        # Find last relevant log lines
+        last_cycle   = None
         last_outcome = None
-        last_error = None
+        last_token   = None   # token_invalid (soft — resolves after validator push)
+        last_reject  = None   # hard rejection (e.g. rate limit)
         for line in reversed(lines):
-            if "competitive_odds_cycle" in line and last_cycle is None:
-                last_cycle = line.strip()
-            if "competitive_outcomes_submitted" in line and last_outcome is None:
-                last_outcome = line.strip()
-            if ("submit_odds_rejected" in line or "token_invalid" in line) and last_error is None:
-                last_error = line.strip()
-            if last_cycle and last_outcome and last_error:
+            # Strip ANSI codes so regex works cleanly
+            clean = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+            if "competitive_odds_cycle" in clean and last_cycle is None:
+                last_cycle = clean
+            if "competitive_outcomes_submitted" in clean and last_outcome is None:
+                last_outcome = clean
+            if "token_invalid" in clean and last_token is None:
+                last_token = clean
+            if "submit_odds_rejected" in clean and "token_invalid" not in clean and last_reject is None:
+                last_reject = clean
+            if last_cycle and last_outcome:
                 break
 
-        if not last_cycle and not last_outcome:
+        if not last_cycle and not last_outcome and not last_token:
             continue
 
         print(f"\n  {CYAN}{miner_name}{RESET}")
+
         if last_cycle:
-            # Extract key numbers with regex
-            m = re.search(r"'submitted': (\d+)", last_cycle)
-            m2 = re.search(r"'skipped_low_change': (\d+)", last_cycle)
-            m3 = re.search(r"'cycle': (\d+)", last_cycle)
-            m4 = re.search(r"'markets_selected': (\d+)", last_cycle)
-            m5 = re.search(r"'batches': (\d+)", last_cycle)
-            sub  = int(m.group(1))  if m  else "?"
-            skip = int(m2.group(1)) if m2 else "?"
-            cyc  = m3.group(1)      if m3 else "?"
-            sel  = m4.group(1)      if m4 else "?"
-            bat  = m5.group(1)      if m5 else "?"
-            sub_col = GREEN if isinstance(sub, int) and sub > 0 else YELLOW
-            # Extract timestamp from log line
+            # Handle both Python repr ({'key': val}) and JSON ({"key": val}) formats
+            def _num(key, line):
+                m = re.search(rf"['\"]?{key}['\"]?\s*:\s*(\d+)", line)
+                return int(m.group(1)) if m else None
+
+            sub  = _num("submitted",        last_cycle)
+            skip = _num("skipped_low_change", last_cycle)
+            cyc  = _num("cycle",            last_cycle)
+            sel  = _num("markets_selected", last_cycle)
+            bat  = _num("batches",          last_cycle)
+            cumul= _num("total_submitted_cumul", last_cycle)
+
+            sub_col  = GREEN if sub and sub > 0 else YELLOW
             ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last_cycle)
             ts_s = ts_m.group(1) if ts_m else ""
-            print(f"    {DIM}{ts_s}{RESET}  cycle={cyc}  selected={sel}  "
-                  f"submitted={sub_col}{sub}{RESET}  skipped_low={skip}  batches={bat}")
+            print(
+                f"    {DIM}{ts_s}{RESET}  "
+                f"cycle={cyc}  selected={sel}  "
+                f"submitted={sub_col}{sub}{RESET}  "
+                f"skipped_low={skip}  batches={bat}"
+                + (f"  cumul={cumul}" if cumul is not None else "")
+            )
+        else:
+            print(f"    {YELLOW}No odds cycle logged yet — waiting for first cycle{RESET}")
+
         if last_outcome:
-            m = re.search(r"'competitive_outcomes_submitted': (\d+)", last_outcome)
+            m = re.search(r"['\"]?competitive_outcomes_submitted['\"]?\s*:\s*(\d+)", last_outcome)
             n = m.group(1) if m else "?"
             ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last_outcome)
             ts_s = ts_m.group(1) if ts_m else ""
             print(f"    {DIM}{ts_s}{RESET}  {GREEN}outcomes_submitted={n}{RESET}")
-        if last_error:
-            ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last_error)
+
+        if last_token:
+            ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last_token)
             ts_s = ts_m.group(1) if ts_m else ""
-            print(f"    {ts_s}  {RED}ERROR: {last_error[-120:]}{RESET}")
+            print(f"    {YELLOW}⚠ {ts_s}  token_invalid — will self-heal when validator pushes (wait ~15 min){RESET}")
+
+        if last_reject:
+            ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last_reject)
+            ts_s = ts_m.group(1) if ts_m else ""
+            # Truncate and clean the error message
+            msg = re.sub(r"\x1b\[[0-9;]*m", "", last_reject)[-120:]
+            print(f"    {RED}✗ {ts_s}  {msg}{RESET}")
 
 print()
 print(f"{BOLD}{'━'*width}{RESET}")
