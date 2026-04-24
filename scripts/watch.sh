@@ -248,28 +248,44 @@ if log_dir.exists():
         print(f"\n  {CYAN}{miner_name}{RESET}")
 
         if last_cycle:
-            # Handle both Python repr ({'key': val}) and JSON ({"key": val}) formats
-            def _num(key, line):
-                m = re.search(rf"['\"]?{key}['\"]?\s*:\s*(\d+)", line)
-                return int(m.group(1)) if m else None
+            # Try multiple patterns: JSON double-quote, Python single-quote, key=value
+            def _num(key, line, aliases=()):
+                keys = [key] + list(aliases)
+                for k in keys:
+                    for pat in [
+                        rf'"{k}":\s*(\d+)',       # JSON:   "key": 5
+                        rf"'{k}':\s*(\d+)",        # Python: 'key': 5
+                        rf'\b{k}\b[=:]\s*(\d+)',   # plain:  key=5 or key: 5
+                    ]:
+                        m = re.search(pat, line)
+                        if m:
+                            return int(m.group(1))
+                return None
 
-            sub  = _num("submitted",        last_cycle)
-            skip = _num("skipped_low_change", last_cycle)
-            cyc  = _num("cycle",            last_cycle)
-            sel  = _num("markets_selected", last_cycle)
-            bat  = _num("batches",          last_cycle)
-            cumul= _num("total_submitted_cumul", last_cycle)
+            sub  = _num("submitted",          last_cycle)
+            skip = _num("skipped_low_change", last_cycle, ["skipped_low", "low_change"])
+            cyc  = _num("cycle",              last_cycle)
+            sel  = _num("markets_selected",   last_cycle, ["selected"])
+            bat  = _num("batches",            last_cycle)
+            cumul= _num("total_submitted_cumul", last_cycle, ["cumul"])
 
-            sub_col  = GREEN if sub and sub > 0 else YELLOW
             ts_m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", last_cycle)
             ts_s = ts_m.group(1) if ts_m else ""
-            print(
-                f"    {DIM}{ts_s}{RESET}  "
-                f"cycle={cyc}  selected={sel}  "
-                f"submitted={sub_col}{sub}{RESET}  "
-                f"skipped_low={skip}  batches={bat}"
-                + (f"  cumul={cumul}" if cumul is not None else "")
-            )
+
+            parsed_any = any(v is not None for v in [sub, skip, cyc, sel, bat])
+            if parsed_any:
+                sub_col = GREEN if sub and sub > 0 else YELLOW
+                print(
+                    f"    {DIM}{ts_s}{RESET}  "
+                    f"cycle={cyc}  selected={sel}  "
+                    f"submitted={sub_col}{sub}{RESET}  "
+                    f"skipped_low={skip}  batches={bat}"
+                    + (f"  cumul={cumul}" if cumul is not None else "")
+                )
+            else:
+                # Regex failed — show raw line (truncated) so format is visible
+                raw = last_cycle[last_cycle.find("competitive_odds_cycle"):][:160]
+                print(f"    {DIM}{ts_s}{RESET}  {YELLOW}[raw]{RESET} {raw}")
         else:
             print(f"    {YELLOW}No odds cycle logged yet — waiting for first cycle{RESET}")
 

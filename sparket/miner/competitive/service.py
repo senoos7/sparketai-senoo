@@ -538,38 +538,6 @@ class CompetitiveMinerService:
         endpoint = getattr(self.miner, "validator_endpoint", None) or {}
         return endpoint.get("token") if isinstance(endpoint, dict) else None
 
-
-def _market_consensus_prob(market: Dict) -> Optional[float]:
-    """Extract the market's consensus home-win implied probability.
-
-    The validator stores consensus odds in fields like moneyline_home
-    (implied probability of home win).  Returns None if not available so
-    the caller can decide whether to skip the edge filter.
-    """
-    # Try direct field first
-    for key in ("moneyline_home", "consensus_home", "implied_prob_home"):
-        val = market.get(key)
-        if val is not None:
-            try:
-                p = float(val)
-                if 0.01 < p < 0.99:
-                    return p
-            except (TypeError, ValueError):
-                pass
-    # Some schemas nest under "consensus" dict
-    consensus = market.get("consensus") or market.get("market_consensus")
-    if isinstance(consensus, dict):
-        for key in ("moneyline_home", "home", "implied_prob_home"):
-            val = consensus.get(key)
-            if val is not None:
-                try:
-                    p = float(val)
-                    if 0.01 < p < 0.99:
-                        return p
-                except (TypeError, ValueError):
-                    pass
-    return None
-
     # ------------------------------------------------------------------
     # KPI helpers
     # ------------------------------------------------------------------
@@ -611,3 +579,33 @@ def _market_consensus_prob(market: Dict) -> Optional[float]:
             }
             for league in self._selector.leagues()
         }
+
+
+def _market_consensus_prob(market: Dict) -> Optional[float]:
+    """Extract the market's consensus home-win implied probability.
+
+    The validator stores consensus odds in fields like moneyline_home
+    (implied probability of home win).  Returns None if not available so
+    the caller can decide whether to skip the edge filter.
+    """
+    for key in ("moneyline_home", "consensus_home", "implied_prob_home"):
+        val = market.get(key)
+        if val is not None:
+            try:
+                p = float(val)
+                if 0.01 < p < 0.99:
+                    return p
+            except (TypeError, ValueError):
+                pass
+    consensus = market.get("consensus") or market.get("market_consensus")
+    if isinstance(consensus, dict):
+        for key in ("moneyline_home", "home", "implied_prob_home"):
+            val = consensus.get(key)
+            if val is not None:
+                try:
+                    p = float(val)
+                    if 0.01 < p < 0.99:
+                        return p
+                except (TypeError, ValueError):
+                    pass
+    return None
