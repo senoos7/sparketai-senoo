@@ -12,9 +12,10 @@
 #   ELO_K      — Elo K-factor for this miner (differentiate models; use "-" for 32)
 #
 # LEAGUE SPLITTING STRATEGY (avoids Sybil/Uniqueness penalty):
-#   Group A (Major US):      mlb,nba,nfl
-#   Group B (European):      epl,la_liga,serie_a,bundesliga
-#   Group C (Other NA):      mls,nhl,ncaab,ncaaf
+#   Every group anchors on at least one US sport (ESPN-supported for outcomes).
+#   Group A (US core + EPL):         nfl,nba,mlb,epl
+#   Group B (US winter + S.Europe):  nhl,nba,la_liga,serie_a
+#   Group C (US college + soccer):   ncaaf,ncaab,mls,bundesliga
 #
 # Prerequisite per new miner:
 #   1. btcli wallet new_hotkey --wallet.name <wallet> --wallet.hotkey <hotkey>
@@ -49,21 +50,27 @@ LOG_DIR="sparket/logs/pm2-mainnet"
 # Miner definitions
 # Format: "WALLET  HOTKEY  PORT  PM2_NAME  API_PORT  LEAGUES  ELO_K"
 #
-# League groups (non-overlapping for uniqueness):
-#   Group A — Major US Sports:       mlb,nba,nfl
-#   Group B — European Football:     epl,la_liga,serie_a,bundesliga
-#   Group C — Other North American:  mls,nhl,ncaab,ncaaf
+# IMPORTANT — League assignment strategy:
+#   Every miner MUST include at least one ESPN-supported US league
+#   (nfl/nba/mlb/nhl/ncaaf/ncaab) so outcome submissions work.
+#   Soccer leagues (epl/la_liga/serie_a/bundesliga/mls) now have ESPN
+#   paths mapped, but each miner should anchor to proven US coverage.
 #
-# ELO_K: use different values so each miner's Elo diverges over time:
+#   Group A — US core + soccer overlay:  nfl,nba,mlb,epl
+#   Group B — US winter + European mix:  nhl,nba,la_liga,serie_a
+#   Group C — US college + other:        ncaaf,ncaab,mls,bundesliga
+#
+# ELO_K: different K-factors so Elo ratings diverge across miners
 #   Miner 1: 32 (standard), Miner 2: 24 (conservative), Miner 3: 48 (aggressive)
 # ----------------------------------------------------------------
 MINERS=(
-  # WALLET    HOTKEY                PORT  PM2_NAME              API_PORT  LEAGUES               ELO_K
-  # Group A
-  "darnsin01  sparket-miner-04220   8094  sparket-miner-01      9094      mlb,nba,nfl           32"
-  "darnsin01  sparket-miner-04231   8096  sparket-miner-03      9096      mls,nhl,ncaab,ncaaf   48"
-  # Group B
-  "darnsin00  sparket-miner-04230   8095  sparket-miner-02      9095      epl,la_liga,serie_a,bundesliga  24"
+  # WALLET    HOTKEY                PORT  PM2_NAME              API_PORT  LEAGUES                    ELO_K
+  # Group A — US core + EPL
+  "darnsin01  sparket-miner-04220   8094  sparket-miner-01      9094      nfl,nba,mlb,epl            32"
+  # Group C — US college + MLS/Bundesliga
+  "darnsin01  sparket-miner-04231   8096  sparket-miner-03      9096      ncaaf,ncaab,mls,bundesliga 48"
+  # Group B — NHL/NBA + La Liga/Serie A
+  "darnsin00  sparket-miner-04230   8095  sparket-miner-02      9095      nhl,nba,la_liga,serie_a    24"
 )
 
 # ----------------------------------------------------------------

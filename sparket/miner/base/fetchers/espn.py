@@ -291,10 +291,15 @@ class ESPNFetcher(ScoreFetcher, StatsFetcher):
         """Fetch the result of a game."""
         home_team = event.get("home_team", "")
         away_team = event.get("away_team", "")
-        sport = event.get("sport", "NFL")
         start_time = event.get("start_time_utc")
-        
+
+        # Try sport field first, then league field as fallback
+        sport = event.get("sport") or event.get("league") or "NFL"
         sport_path = get_espn_sport_path(sport)
+        if not sport_path:
+            # Last-ditch: try normalising (strip underscores/spaces)
+            normalised = sport.upper().replace(" ", "_").replace("-", "_")
+            sport_path = get_espn_sport_path(normalised)
         if not sport_path:
             return None
         
@@ -317,13 +322,46 @@ class ESPNFetcher(ScoreFetcher, StatsFetcher):
         
         return self._find_game_result(data, home_team, away_team)
     
+    @staticmethod
+    def _team_matches(espn_team: Dict[str, Any], lookup: str) -> bool:
+        """Return True if the ESPN team dict matches a lookup string.
+
+        Tries (in order):
+          1. Exact abbreviation match  (e.g. "MCI" == "MCI")
+          2. Full display name contains lookup (e.g. "Manchester City" in event)
+          3. lookup contains ESPN display name (reverse contains)
+          4. Location name match (e.g. "Manchester")
+        All comparisons are case-insensitive.
+        """
+        if not lookup:
+            return False
+        lu = lookup.strip().lower()
+        abbrev = espn_team.get("abbreviation", "").lower()
+        name   = espn_team.get("displayName", espn_team.get("name", "")).lower()
+        loc    = espn_team.get("location", "").lower()
+        short  = espn_team.get("shortDisplayName", "").lower()
+
+        return (
+            abbrev == lu
+            or name == lu
+            or (lu in name and len(lu) >= 4)
+            or (name in lu and len(name) >= 4)
+            or (loc and loc == lu)
+            or (short and short == lu)
+        )
+
     def _find_game_result(
         self, 
         data: Dict[str, Any], 
         home_team: str, 
         away_team: str
     ) -> Optional[GameResult]:
-        """Find and parse a specific game from scoreboard."""
+        """Find and parse a specific game from scoreboard.
+
+        Uses fuzzy team matching so that full team names sent by the validator
+        (e.g. "Manchester City", "Arsenal") are matched against ESPN's
+        abbreviation, displayName, and location fields.
+        """
         events = data.get("events", [])
         
         for event in events:
@@ -333,22 +371,26 @@ class ESPNFetcher(ScoreFetcher, StatsFetcher):
             if len(competitors) != 2:
                 continue
             
-            # Match teams
-            home = None
-            away = None
+            # Separate home / away competitors
+            home_c = None
+            away_c = None
             for c in competitors:
-                abbrev = c.get("team", {}).get("abbreviation", "").upper()
-                home_away = c.get("homeAway")
-                if home_away == "home":
-                    home = (abbrev, c)
+                if c.get("homeAway") == "home":
+                    home_c = c
                 else:
-                    away = (abbrev, c)
+                    away_c = c
             
-            if not home or not away:
+            if not home_c or not away_c:
                 continue
-            
-            # Check if this is our game
-            if home[0] != home_team.upper() or away[0] != away_team.upper():
+
+            home_espn = home_c.get("team", {})
+            away_espn = away_c.get("team", {})
+
+            # Check if this is our game via fuzzy match
+            if not (
+                self._team_matches(home_espn, home_team)
+                and self._team_matches(away_espn, away_team)
+            ):
                 continue
             
             # Parse status
@@ -357,9 +399,18 @@ class ESPNFetcher(ScoreFetcher, StatsFetcher):
             is_final = status_type.get("completed", False)
             status_name = status_type.get("name", "")
             
-            # Parse scores
-            home_score = int(home[1].get("score", 0)) if home[1].get("score") else None
-            away_score = int(away[1].get("score", 0)) if away[1].get("score") else None
+            # Parse scores — soccer may return float strings
+            def _score(c: Dict) -> Optional[int]:
+                v = c.get("score")
+                if v is None:
+                    return None
+                try:
+                    return int(float(v))
+                except (ValueError, TypeError):
+                    return None
+
+            home_score = _score(home_c)
+            away_score = _score(away_c)
             
             return GameResult(
                 is_final=is_final,

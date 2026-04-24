@@ -113,12 +113,25 @@ LEAGUE_TEAMS: Dict[str, Dict[str, Dict[str, Any]]] = {
 
 # ESPN sport paths
 ESPN_SPORT_PATHS: Dict[str, str] = {
-    "NFL": "football/nfl",
-    "NBA": "basketball/nba",
-    "MLB": "baseball/mlb",
-    "NHL": "hockey/nhl",
+    # US major sports
+    "NFL":   "football/nfl",
+    "NBA":   "basketball/nba",
+    "MLB":   "baseball/mlb",
+    "NHL":   "hockey/nhl",
     "NCAAF": "football/college-football",
     "NCAAB": "basketball/mens-college-basketball",
+    # Soccer / football
+    "MLS":        "soccer/usa.1",
+    "EPL":        "soccer/eng.1",
+    "LA_LIGA":    "soccer/esp.1",
+    "SERIE_A":    "soccer/ita.1",
+    "BUNDESLIGA": "soccer/ger.1",
+    # Common aliases the validator may send
+    "PREMIER_LEAGUE": "soccer/eng.1",
+    "ENGLISH_PREMIER_LEAGUE": "soccer/eng.1",
+    "LALIGA":     "soccer/esp.1",
+    "SERIEA":     "soccer/ita.1",
+    "SOCCER":     "soccer/eng.1",   # generic fallback
 }
 
 
