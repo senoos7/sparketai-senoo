@@ -71,8 +71,10 @@ LOG_DIR="sparket/logs/pm2-mainnet"
 #
 # Prerequisites:
 #   btcli wallet new_hotkey --wallet.name darnsin00 --wallet.hotkey sparket-miner-04251
+#   btcli wallet new_hotkey --wallet.name darnsin00 --wallet.hotkey sparket-miner-04250
 #   btcli subnets register --netuid 57 --wallet.name darnsin00 --wallet.hotkey sparket-miner-04251
-#   sudo ufw allow 8100/tcp
+#   btcli subnets register --netuid 57 --wallet.name darnsin00 --wallet.hotkey sparket-miner-04250
+#   sudo ufw allow 8100/tcp && sudo ufw allow 8101/tcp
 # ----------------------------------------------------------------
 MINERS=(
   # WALLET    HOTKEY                PORT  PM2_NAME         API_PORT  LEAGUES                  ELO_K
@@ -93,8 +95,10 @@ MINERS=(
   "darnsin00  sparket-miner-04241   8098  sparket-miner-05  9098     nhl,mls,uol              40"
   # Miner-06: nba + nhl  (both in playoffs Apr–Jun; K=64 diverges from miner-02 K=16 on NBA)
   "darnsin00  sparket-miner-04242   8099  sparket-miner-06  9099     nba,nhl                  64"
-  # Miner-07 (NEW): mlb + esp  (MLB most games/day; K=80 maximally diverges from all)
+  # Miner-07: mlb + esp  (MLB most games/day; K=80 maximally diverges from all)
   "darnsin00  sparket-miner-04250   8100  sparket-miner-07  9100     mlb,esp                  80"
+  # Miner-08 (NEW): mlb + frl1  (Ligue 1 thin market; K=12 ultra-conservative → biggest divergence from K=80)
+  "darnsin00  sparket-miner-04251   8101  sparket-miner-08  9101     mlb,frl1                 12"
 )
 
 # ----------------------------------------------------------------
@@ -228,8 +232,8 @@ $(case "${pm2_name}" in
     echo "COMPETITIVE_CHANGE_THRESHOLD=0.08"
     echo "COMPETITIVE_MAX_MARKETS=20"
     ;;
-  sparket-miner-06|sparket-miner-07)
-    # Contested leagues (NBA/NHL/MLB/ESP) → need high edge to stand out
+  sparket-miner-06|sparket-miner-07|sparket-miner-08)
+    # Contested leagues (NBA/NHL/MLB/ESP/FRL1) → need high edge to stand out
     echo "COMPETITIVE_MIN_EDGE=0.08"
     echo "COMPETITIVE_CHANGE_THRESHOLD=0.06"
     echo "COMPETITIVE_MAX_MARKETS=25"
