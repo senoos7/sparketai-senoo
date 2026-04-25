@@ -28,13 +28,15 @@ _DEFAULT_LEAGUES = ["mlb", "epl", "nba", "esp", "nfl"]
 # The validator uses short codes like "esp" (La Liga), "ita" (Serie A), etc.
 # This lets callers configure "la_liga" and still match "esp" in market data.
 _LEAGUE_ALIASES: dict[str, str] = {
-    # Soccer long names → validator short codes
+    # Soccer long names → validator short codes (verified from sparket.ai/api/v1/events)
     "la_liga":    "esp",
     "laliga":     "esp",
     "serie_a":    "ita",
     "seriea":     "ita",
-    "bundesliga": "ger",
-    "bund":       "ger",
+    # German football: validator uses "deb" (Deutsche), NOT "ger"
+    "bundesliga": "deb",
+    "bund":       "deb",
+    "ger":        "deb",   # legacy alias — config files may use "ger"
     "premier_league":          "epl",
     "english_premier_league":  "epl",
     "ligue1":     "frl1",

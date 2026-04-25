@@ -56,39 +56,45 @@ LOG_DIR="sparket/logs/pm2-mainnet"
 #
 #   Miner-01  nfl,epl              K=32  (American football + Premier League)
 #   Miner-02  nba,la_liga          K=16  (Basketball + La Liga — conservative)
-#   Miner-03  ncaaf,ncaab,bundesliga K=56 (College + Bundesliga — aggressive)
-#   Miner-04  mlb,serie_a          K=24  (Baseball + Serie A)
-#   Miner-05  nhl,mls              K=40  (Ice hockey + MLS)
+#   Miner-03  ncaaf,ncaab,ger,uol  K=56 (College + Bundesliga + UOL — aggressive)
+#   Miner-04  mlb,ita              K=24  (Baseball + Serie A)
+#   Miner-05  nhl,mls,uol          K=40  (Ice hockey + MLS + UOL)
+#   Miner-06  nba,nhl              K=64  (NBA playoffs + NHL playoffs — very aggressive)
+#   Miner-07  mlb,esp              K=80  (Baseball + La Liga — maximally aggressive)
 #
-# Prerequisites for new hotkeys (miner-04, miner-05):
-#   btcli wallet new_hotkey --wallet.name darnsin01 --wallet.hotkey sparket-miner-04232
-#   btcli wallet new_hotkey --wallet.name darnsin01 --wallet.hotkey sparket-miner-04233
-#   btcli subnets register --netuid 57 --wallet.name darnsin01 --wallet.hotkey sparket-miner-04232
-#   btcli subnets register --netuid 57 --wallet.name darnsin01 --wallet.hotkey sparket-miner-04233
-#   sudo ufw allow 8097/tcp && sudo ufw allow 8098/tcp
+# Season calendar (April–August = off-season for):
+#   NFL:  Sep–Jan only  ← do NOT include in April/summer miners
+#   NCAAF: Aug–Jan only
+#   NCAAB: Nov–Apr (March Madness ends early April)
+#
+# Active year-round / spring: MLB, NBA(playoffs), NHL(playoffs), MLS, EPL, ESP, GER, ITA, FRL1, UOL
+#
+# Prerequisites:
+#   btcli wallet new_hotkey --wallet.name darnsin00 --wallet.hotkey sparket-miner-04251
+#   btcli subnets register --netuid 57 --wallet.name darnsin00 --wallet.hotkey sparket-miner-04251
+#   sudo ufw allow 8100/tcp
 # ----------------------------------------------------------------
 MINERS=(
   # WALLET    HOTKEY                PORT  PM2_NAME         API_PORT  LEAGUES                  ELO_K
   #
-  # Soccer league codes — validator uses SHORT codes (not long names):
-  #   La Liga → "esp"   Serie A → "ita"   Bundesliga → "ger"   EPL → "epl"
-  # EventSelector auto-aliases long names but short codes are used here directly.
+  # Soccer codes: epl esp ita ger frl1 uol
+  # NOTE: NFL/NCAAF off-season Apr–Aug → replaced with active spring leagues
   #
-  # UOL: both current top-2 miners (p99-100 Marginal) submit exclusively to "uol"
-  # — an obscure league with almost no other miners. Include in thin-market miners.
-  #
-  # Miner-01: nfl + epl + frl1  (strict edge filter, rank #3, longest Elo history)
-  "darnsin01  sparket-miner-04220   8094  sparket-miner-01  9094     nfl,epl,frl1             32"
-  # Miner-02: nba + esp  (La Liga = less contested than EPL; low K → conservative Elo)
+  # Miner-01: mlb + epl + frl1  (rank #1, longest Elo — MLB replaces off-season NFL)
+  "darnsin01  sparket-miner-04220   8094  sparket-miner-01  9094     mlb,epl,frl1             32"
+  # Miner-02: nba + esp  (La Liga = less contested; conservative K diverges from others)
   "darnsin00  sparket-miner-04230   8095  sparket-miner-02  9095     nba,esp                  16"
-  # Miner-03: college + ger + uol  (thin/niche focus → high Marginal; aggressive K)
-  "darnsin01  sparket-miner-04231   8096  sparket-miner-03  9096     ncaaf,ncaab,ger,uol      56"
+  # Miner-03: mlb + deb + uol  (MLB=thin 21-39k subs; deb=Bundesliga correct code; K=56 ultra-aggressive)
+  # MLB n_submissions ~21k-39k vs soccer 85k-300k → higher Marginal on MLB
+  "darnsin01  sparket-miner-04231   8096  sparket-miner-03  9096     mlb,deb,uol              56"
   # Miner-04: mlb + ita  (baseball + Serie A; moderate K)
   "darnsin00  sparket-miner-04240   8097  sparket-miner-04  9097     mlb,ita                  24"
-  # Miner-05: nhl + mls + uol  (thin ice/soccer markets; medium K)
+  # Miner-05: nhl + mls + uol  (NHL/MLS both active Apr–Jun; medium K)
   "darnsin00  sparket-miner-04241   8098  sparket-miner-05  9098     nhl,mls,uol              40"
-  # Miner-06: nfl + nba  (popular leagues w/ very aggressive K=64 → diverges from miner-01 K=32 and miner-02 K=16)
-  "darnsin00  sparket-miner-04242   8099  sparket-miner-06  9099     nfl,nba                  64"
+  # Miner-06: nba + nhl  (both in playoffs Apr–Jun; K=64 diverges from miner-02 K=16 on NBA)
+  "darnsin00  sparket-miner-04242   8099  sparket-miner-06  9099     nba,nhl                  64"
+  # Miner-07 (NEW): mlb + esp  (MLB most games/day; K=80 maximally diverges from all)
+  "darnsin00  sparket-miner-04250   8100  sparket-miner-07  9100     mlb,esp                  80"
 )
 
 # ----------------------------------------------------------------
@@ -217,21 +223,25 @@ COMPETITIVE_MODEL_SEED=${model_seed}
 #   miner-02/04: standard
 $(case "${pm2_name}" in
   sparket-miner-01)
+    # Rank #1 — keep strict: EPL/FRL1/MLB selectivity drives high Edge
     echo "COMPETITIVE_MIN_EDGE=0.10"
     echo "COMPETITIVE_CHANGE_THRESHOLD=0.08"
     echo "COMPETITIVE_MAX_MARKETS=20"
     ;;
-  sparket-miner-06)
-    echo "COMPETITIVE_MIN_EDGE=0.10"
-    echo "COMPETITIVE_CHANGE_THRESHOLD=0.08"
+  sparket-miner-06|sparket-miner-07)
+    # Contested leagues (NBA/NHL/MLB/ESP) → need high edge to stand out
+    echo "COMPETITIVE_MIN_EDGE=0.08"
+    echo "COMPETITIVE_CHANGE_THRESHOLD=0.06"
     echo "COMPETITIVE_MAX_MARKETS=25"
     ;;
   sparket-miner-03|sparket-miner-05)
+    # Thin markets (UOL/GER/MLS) → fewer competitors → lower edge threshold OK
     echo "COMPETITIVE_MIN_EDGE=0.05"
     echo "COMPETITIVE_CHANGE_THRESHOLD=0.04"
     echo "COMPETITIVE_MAX_MARKETS=40"
     ;;
   *)
+    # Standard
     echo "COMPETITIVE_MIN_EDGE=0.07"
     echo "COMPETITIVE_CHANGE_THRESHOLD=0.05"
     echo "COMPETITIVE_MAX_MARKETS=35"
