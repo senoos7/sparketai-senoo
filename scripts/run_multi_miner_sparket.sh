@@ -77,17 +77,18 @@ MINERS=(
   # UOL: both current top-2 miners (p99-100 Marginal) submit exclusively to "uol"
   # — an obscure league with almost no other miners. Include in thin-market miners.
   #
-  # Miner-01: nfl + epl  (strict edge filter — recovering from high Brier)
+  # Miner-01: nfl + epl + frl1  (strict edge filter, rank #3, longest Elo history)
   "darnsin01  sparket-miner-04220   8094  sparket-miner-01  9094     nfl,epl,frl1             32"
-  # Miner-02: nba + esp  (NBA exclusive + La Liga with correct validator code)
+  # Miner-02: nba + esp  (La Liga = less contested than EPL; low K → conservative Elo)
   "darnsin00  sparket-miner-04230   8095  sparket-miner-02  9095     nba,esp                  16"
-  # Miner-03: college + ger + uol  (thin/niche focus → high Marginal target)
-  "darnsin01  sparket-miner-04231   8096  sparket-miner-03  9096     ncaaf,ncaab,ger,uol       56"
-  # Miner-04 (NEW): mlb + ita  — register sparket-miner-04232 first
+  # Miner-03: college + ger + uol  (thin/niche focus → high Marginal; aggressive K)
+  "darnsin01  sparket-miner-04231   8096  sparket-miner-03  9096     ncaaf,ncaab,ger,uol      56"
+  # Miner-04: mlb + ita  (baseball + Serie A; moderate K)
   "darnsin00  sparket-miner-04240   8097  sparket-miner-04  9097     mlb,ita                  24"
-  # Miner-05 (NEW): nhl + mls + uol  — double-down on thin markets
+  # Miner-05: nhl + mls + uol  (thin ice/soccer markets; medium K)
   "darnsin00  sparket-miner-04241   8098  sparket-miner-05  9098     nhl,mls,uol              40"
-  "darnsin00  sparket-miner-04242   8099  sparket-miner-06  9099     nhl,mls,uol              40"
+  # Miner-06: nfl + nba  (popular leagues w/ very aggressive K=64 → diverges from miner-01 K=32 and miner-02 K=16)
+  "darnsin00  sparket-miner-04242   8099  sparket-miner-06  9099     nfl,nba                  64"
 )
 
 # ----------------------------------------------------------------
@@ -208,17 +209,34 @@ COMPETITIVE_ELO_K=${elo_k}
 COMPETITIVE_MODEL_SEED=${model_seed}
 
 # Submission quality filters (drives Edge + Marginal scores)
-# Miner-01 uses a stricter edge filter while recovering from high Brier.
-# Other miners use 0.06. Stricter = fewer but more accurate submissions.
-$(if [[ "${pm2_name}" == "sparket-miner-01" ]]; then
-  echo "COMPETITIVE_MIN_EDGE=0.10"
-  echo "COMPETITIVE_CHANGE_THRESHOLD=0.08"
-  echo "COMPETITIVE_MAX_MARKETS=20"
-else
-  echo "COMPETITIVE_MIN_EDGE=0.06"
-  echo "COMPETITIVE_CHANGE_THRESHOLD=0.05"
-  echo "COMPETITIVE_MAX_MARKETS=50"
-fi)
+# Rank #0 analysis: p13 submissions, p90 Marginal, p80 Edge → selectivity beats volume.
+# Strategy: submit less but only when model strongly disagrees with market.
+#   miner-01: strictest (established, recovering Brier — keep conservative)
+#   miner-06: strict (new, covers contested nfl+nba leagues — needs high edge to compete)
+#   miner-03/05: medium (thin markets = fewer competitors = lower edge needed)
+#   miner-02/04: standard
+$(case "${pm2_name}" in
+  sparket-miner-01)
+    echo "COMPETITIVE_MIN_EDGE=0.10"
+    echo "COMPETITIVE_CHANGE_THRESHOLD=0.08"
+    echo "COMPETITIVE_MAX_MARKETS=20"
+    ;;
+  sparket-miner-06)
+    echo "COMPETITIVE_MIN_EDGE=0.10"
+    echo "COMPETITIVE_CHANGE_THRESHOLD=0.08"
+    echo "COMPETITIVE_MAX_MARKETS=25"
+    ;;
+  sparket-miner-03|sparket-miner-05)
+    echo "COMPETITIVE_MIN_EDGE=0.05"
+    echo "COMPETITIVE_CHANGE_THRESHOLD=0.04"
+    echo "COMPETITIVE_MAX_MARKETS=40"
+    ;;
+  *)
+    echo "COMPETITIVE_MIN_EDGE=0.07"
+    echo "COMPETITIVE_CHANGE_THRESHOLD=0.05"
+    echo "COMPETITIVE_MAX_MARKETS=35"
+    ;;
+esac)
 
 SPARKET_TEST_MODE=false
 PYTHONUNBUFFERED=1
