@@ -31,8 +31,10 @@ _LEAGUE_ALIASES: dict[str, str] = {
     # Soccer long names → validator short codes (verified from sparket.ai/api/v1/events)
     "la_liga":    "esp",
     "laliga":     "esp",
-    "serie_a":    "ita",
-    "seriea":     "ita",
+    # Serie A: validator uses "itsa" (Italian Serie A), NOT "ita"
+    "serie_a":    "itsa",
+    "seriea":     "itsa",
+    "ita":        "itsa",   # legacy alias — config files used "ita"
     # German football: validator uses "deb" (Deutsche), NOT "ger"
     "bundesliga": "deb",
     "bund":       "deb",

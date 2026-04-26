@@ -79,7 +79,8 @@ LOG_DIR="sparket/logs/pm2-mainnet"
 MINERS=(
   # WALLET    HOTKEY                PORT  PM2_NAME         API_PORT  LEAGUES                  ELO_K
   #
-  # Soccer codes: epl esp ita ger frl1 uol
+  # Soccer codes (verified from sparket.ai API): epl esp itsa deb frl1 mls uol ucl
+  # NOTE: "ita" → "itsa", "ger" → "deb"  (aliases handled in event_selector.py)
   # NOTE: NFL/NCAAF off-season Apr–Aug → replaced with active spring leagues
   #
   # Miner-01: mlb + epl + frl1  (rank #1, longest Elo — MLB replaces off-season NFL)
@@ -89,8 +90,8 @@ MINERS=(
   # Miner-03: mlb + deb + uol  (MLB=thin 21-39k subs; deb=Bundesliga correct code; K=56 ultra-aggressive)
   # MLB n_submissions ~21k-39k vs soccer 85k-300k → higher Marginal on MLB
   "darnsin01  sparket-miner-04231   8096  sparket-miner-03  9096     mlb,deb,uol              56"
-  # Miner-04: mlb + ita  (baseball + Serie A; moderate K)
-  "darnsin00  sparket-miner-04240   8097  sparket-miner-04  9097     mlb,ita                  24"
+  # Miner-04: mlb + itsa  (baseball + Serie A; "itsa" is correct validator code; moderate K)
+  "darnsin00  sparket-miner-04240   8097  sparket-miner-04  9097     mlb,itsa                 24"
   # Miner-05: nhl + mls + uol  (NHL/MLS both active Apr–Jun; medium K)
   "darnsin00  sparket-miner-04241   8098  sparket-miner-05  9098     nhl,mls,uol              40"
   # Miner-06: nba + nhl  (both in playoffs Apr–Jun; K=64 diverges from miner-02 K=16 on NBA)
